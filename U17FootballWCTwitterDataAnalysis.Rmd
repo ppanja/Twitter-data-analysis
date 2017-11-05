@@ -1,0 +1,198 @@
+---
+title: "U17 Football WorldCup Twitter Data Analysis"
+author: "Prasanta Panja"
+date: "5 November 2017"
+output: html_document
+topic: Twitter data of U17 World Cup final day (28th October) and day after final (29th October) has been used to analyze
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+require(tm) 
+require(ggplot2)
+require(wordcloud) 
+require(topicmodels)
+require(data.table)
+require(stringi)
+require(qdap) 
+devtools::install_github("hrbrmstr/streamgraph")
+require(streamgraph)
+require(RColorBrewer)
+library(tm) 
+library(ggplot2)
+library(wordcloud) 
+library(topicmodels)
+library(data.table)
+library(stringi)
+library(qdap) 
+library(streamgraph)
+library(RColorBrewer)
+```
+
+Read twitter data
+```{r}
+setwd("C:/Users/Prasanta/Downloads/PGPBABI/WebSocialAnalytics/GA")
+tweetsU17final <-read.csv("U17final2.csv")
+```
+
+Cleaning the text data by removing links, tags and delimiters
+Build a Corpus, and specify the location to be the character Vectors
+```{r}
+df <- tweetsU17final
+df$text <- genX(df$text, " <", ">")
+myCorpus<- Corpus(VectorSource(df$text))
+```
+
+convert to Lowercase
+```{r}
+myCorpus <- tm_map(myCorpus, content_transformer(stri_trans_tolower))
+```
+
+Remove the links (URLs)
+```{r}
+removeURL <- function(x) gsub("http[^[:space:]]*", "", x) 
+myCorpus <- tm_map(myCorpus, content_transformer(removeURL))
+```
+
+Remove anything except the english language and space
+```{r}
+removeNumPunct <- function(x) gsub("[^[:alpha:][:space:]]*", "", x) 
+myCorpus <- tm_map(myCorpus, content_transformer(removeNumPunct))
+```
+
+Remove Stopwords
+```{r}
+myStopWords<- c((stopwords('english')),c("mday","rt","yday","wday","min","hour","just","year","character","cup","languag","datetimestamp","bbouk"))
+myCorpus<- tm_map(myCorpus,removeWords , myStopWords)
+```
+
+Remove Single letter words
+```{r}
+removeSingle <- function(x) gsub(" . ", " ", x)
+myCorpus <- tm_map(myCorpus, content_transformer(removeSingle))
+```
+
+Remove Extra Whitespaces
+```{r}
+myCorpus<- tm_map(myCorpus, stripWhitespace)
+```
+
+Stem words in the corpus
+```{r}
+myCorpus<-tm_map(myCorpus, stemDocument)
+```
+
+Replace words with the proper ones
+```{r}
+replaceWord <- function(corpus, oldword, newword)
+{
+  tm_map(corpus, content_transformer(gsub), pattern=oldword, replacement=newword)
+}
+myCorpus<- replaceWord(myCorpus, "world", "worldcup")
+myCorpus<- replaceWord(myCorpus, "cupcup", "cup")
+myCorpus<- replaceWord(myCorpus, "histori", "historic")
+myCorpus<- replaceWord(myCorpus, "victori", "victory")
+myCorpus<- replaceWord(myCorpus, "becom", "become")
+myCorpus<- replaceWord(myCorpus, "minut", "minute")
+myCorpus<- replaceWord(myCorpus, "congratul", "congratulation")
+```
+
+Remove Single letter words
+```{r}
+removeSingle <- function(x) gsub(" . ", " ", x)
+myCorpus <- tm_map(myCorpus, content_transformer(removeSingle))
+```
+
+Find the terms used most frequently
+```{r}
+tdm<- TermDocumentMatrix(myCorpus, control= list(wordLengths= c(1, Inf)))
+(freq.terms <- findFreqTerms(tdm, lowfreq = 50))
+term.freq <- rowSums(as.matrix(tdm))
+term.freq <- subset(term.freq, term.freq > 50)
+df2 <- data.frame(term = names(term.freq), freq= term.freq)
+```
+
+
+Plotting the graph of frequent terms
+```{r df2}
+ggplot(df2, aes(reorder(term, freq),freq)) + theme_bw() + geom_bar(stat = "identity")  + coord_flip() +labs(list(title="Term Frequency Chart", x="Terms", y="Term Counts"))
+```
+
+Calculate the frequency of words and sort it by frequency and setting up the Wordcloud
+```{r}
+word.freq <-sort(rowSums(as.matrix(tdm)), decreasing= FALSE)
+pal<- brewer.pal(8, "Dark2")
+wordcloud(words = names(word.freq), freq = word.freq, min.freq = 2, random.order = F, colors = pal, max.words = 50)
+```
+
+Find association with a specific keyword in the tweets - england, champion
+```{r}
+dtm <- DocumentTermMatrix(myCorpus)
+findAssocs(dtm, 'england', 0.30)
+findAssocs(dtm, 'champion', 0.30)
+```
+
+Clustering (Easy to identify England as Champion of U17 World Cup Tournament)
+```{r}
+mydata.dtm <- TermDocumentMatrix(myCorpus)
+mydata.dtm2 <- removeSparseTerms(mydata.dtm, sparse=0.93)
+mydata.df <- as.data.frame(inspect(mydata.dtm2))
+nrow(mydata.df)
+ncol(mydata.df)
+mydata.df.scale <- scale(mydata.df)
+dst <- dist(mydata.df.scale, method = "euclidean") 
+fit <- hclust(dst, method="ward.D2")
+plot(fit) 
+groups <- cutree(fit, k=5)
+rect.hclust(fit, k=5, border="red") ## Draw dendogram with red borders around the 5 clusters
+```
+
+Topic Modelling
+```{r}
+dtm <- as.DocumentTermMatrix(mydata.dtm)
+rowTotals <- apply(dtm , 1, sum)
+NullDocs <- dtm[rowTotals==0, ]
+dtm   <- dtm[rowTotals> 0, ]
+if (length(NullDocs$dimnames$Docs) > 0) {
+  df <- df[-as.numeric(NullDocs$dimnames$Docs),]
+}
+lda <- LDA(dtm, k = 5) # find 5 topic
+term <- terms(lda, 7) # first 7 terms of every topic
+(term <- apply(term, MARGIN = 2, paste, collapse = ", "))
+topics<- topics(lda)
+topics<- data.frame(date=(df$created), topic = topics)
+qplot (date, ..count.., data=topics, geom ="density", fill= term[topic], position="stack")
+```
+
+Sentiment analysis (Going down next day of the U17 final)
+```{r}
+sentiments <- polarity(removePunctuation(removeNumbers(tolower(df$text))))
+sentiments <- data.frame(sentiments$all$polarity)
+
+sentiments[["polarity"]] <- cut(sentiments[[ "sentiments.all.polarity"]], c(-5,0.0,5), labels = c("negative","positive"))
+
+table(sentiments$polarity)
+
+sentiments$score<- 0
+sentiments$score[sentiments$polarity == "positive"]<-1
+sentiments$score[sentiments$polarity == "negative"]<- -1
+sentiments$date <- as.IDate(df$created)
+result <- aggregate(score ~ date, data = sentiments, sum)
+plot(result, type = "l")
+
+Data<-data.frame(sentiments$polarity)
+colnames(Data)[1] <- "polarity"
+Data$Date <- df$created
+Data$text <- NULL
+Data$Count <- 1
+
+graphdata <- aggregate(Count ~ polarity + as.character.Date(Date),data=Data,FUN=length)
+colnames(graphdata)[2] <- "Date"
+str(graphdata)
+streamgraph(graphdata,"polarity","Count","Date")
+```
+
